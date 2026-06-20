@@ -2,26 +2,16 @@
  * rugs.fun standard game monitor — Puppeteer WebSocket interception
  */
 
-import { execSync } from "node:child_process";
 import puppeteer, {
   type Browser,
   type Page,
   type CDPSession,
-} from "puppeteer-core";
+} from "puppeteer";
 import { logger } from "./logger";
 
 const RUGS_URL = "https://rugs.fun";
 const PAGE_TIMEOUT_MS = 25_000;
 const HEARTBEAT_MS = 30_000;
-
-function findChromium(): string {
-  if (process.env.CHROMIUM_PATH) return process.env.CHROMIUM_PATH;
-  try {
-    return execSync("which chromium", { encoding: "utf8" }).trim();
-  } catch {
-    throw new Error("Chromium not found. Set CHROMIUM_PATH or install chromium.");
-  }
-}
 
 async function sendWebhook(key: string, content: string): Promise<void> {
   const url = process.env[key];
@@ -193,6 +183,9 @@ async function launchPage(browser: Browser): Promise<Page> {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 800 });
 
+  page.on("error", (err) => logger.error({ err }, "Page error"));
+  page.on("close", () => logger.info("Page closed"));
+
   const client: CDPSession = await page.createCDPSession();
   await client.send("Network.enable");
 
@@ -204,16 +197,22 @@ async function launchPage(browser: Browser): Promise<Page> {
     handleGameEvent(eventName, data);
   });
 
+  client.on("Target.targetCrashed", (event) => logger.error({ event }, "CDP target crashed"));
+
   logger.info({ url: RUGS_URL }, "Navigating to rugs.fun");
-  await page.goto(RUGS_URL, { waitUntil: "domcontentloaded", timeout: PAGE_TIMEOUT_MS });
+  try {
+    await page.goto(RUGS_URL, { waitUntil: "domcontentloaded", timeout: PAGE_TIMEOUT_MS });
+  } catch (err) {
+    logger.error({ err }, "Navigation to rugs.fun failed");
+    throw err;
+  }
   await new Promise((r) => setTimeout(r, 5_000));
   logger.info("Page ready — intercepting game events via CDP");
   return page;
 }
 
 export async function startMonitor(): Promise<void> {
-  const chromiumPath = findChromium();
-  logger.info({ chromiumPath }, "Starting rugs.fun monitor (WS intercept mode)");
+  logger.info("Starting rugs.fun monitor (WS intercept mode)");
 
   let browser: Browser | null = null;
   let page: Page | null = null;
@@ -223,7 +222,6 @@ export async function startMonitor(): Promise<void> {
     try { if (browser) await browser.close().catch(() => {}); } catch {}
 
     browser = await puppeteer.launch({
-      executablePath: chromiumPath,
       headless: true,
       args: [
         "--no-sandbox",
@@ -235,7 +233,6 @@ export async function startMonitor(): Promise<void> {
         "--disable-background-timer-throttling",
         "--no-first-run",
         "--no-zygote",
-        "--single-process",
         "--mute-audio",
       ],
     });
