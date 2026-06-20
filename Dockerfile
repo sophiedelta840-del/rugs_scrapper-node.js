@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Copy package files and install all dependencies (including devDependencies for TypeScript)
 COPY package*.json ./
-RUN npm ci
+RUN npm install
 
 # Copy source and compile TypeScript
 COPY . .
@@ -24,7 +24,7 @@ WORKDIR /app
 # Copy package files and install production dependencies only
 COPY package*.json ./
 ENV PUPPETEER_SKIP_DOWNLOAD=true
-RUN npm ci --omit=dev
+RUN npm install --omit=dev
 
 # Copy compiled JavaScript from builder
 COPY --from=builder /app/dist ./dist
