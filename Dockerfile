@@ -1,25 +1,36 @@
+FROM node:20-slim AS builder
+
+WORKDIR /app
+
+# Copy package files and install all dependencies (including devDependencies for TypeScript)
+COPY package*.json ./
+RUN npm ci
+
+# Copy source and compile TypeScript
+COPY . .
+RUN npx tsc
+
+# --- Production stage ---
 FROM node:20-slim
 
 # Install Chromium and dependencies
 RUN apt-get update && apt-get install -y \
-    chromium-browser \
+    chromium \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy package files
+# Copy package files and install production dependencies only
 COPY package*.json ./
-
-# Install dependencies
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 RUN npm ci --omit=dev
 
-# Copy source
-COPY . .
+# Copy compiled JavaScript from builder
+COPY --from=builder /app/dist ./dist
 
-# Set Chromium path for puppeteer-core
-ENV CHROMIUM_PATH=/usr/bin/chromium
+# Set Chromium executable path for puppeteer
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Start the app
-CMD ["npm", "start"]
+CMD ["node", "dist/index.js"]
 
